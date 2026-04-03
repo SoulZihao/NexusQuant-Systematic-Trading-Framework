@@ -16,6 +16,8 @@ exchange = ccxt.okx({
 balances=exchange.fetch_balance()
 for key,val in balances.items():
     if key!='info':print(key,val)
+print(balances['info'])
+# print(balances['total']['USDT']) # type: ignore
 print('-'*30)
 
 markets = exchange.load_markets()
@@ -40,3 +42,4 @@ asks = order_book.get("asks")
 for i, j in zip(bids, asks):
     print(i,j)
 print('-'*30)
+
