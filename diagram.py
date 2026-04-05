@@ -9,7 +9,7 @@ df = fetch_data()
 supertrend_data = _super_trend(df)
 
 plot_df = supertrend_data.copy()
-plot_df.set_index('timestamp', inplace=True)
+df.set_index('timestamp', inplace=True)
 
 # ==============================
 # 第二步：生成信号标注数据
@@ -24,12 +24,12 @@ buy_signals = (plot_df['is_uptrend'] == True) & (plot_df['is_uptrend'].shift(1) 
 sell_signals = (plot_df['is_uptrend'] == False) & (plot_df['is_uptrend'].shift(1) == True)
 
 # 创建与 plot_df 等长的数组，用于存储标注价格，默认为 NaN（不显示）
-plot_df['buy_price'] = np.nan
-plot_df['sell_price'] = np.nan
+# plot_df['buy_price'] = np.nan
+# plot_df['sell_price'] = np.nan
 
 # 在信号发生的日期，填入相应的价格用于标注
-plot_df.loc[buy_signals, 'buy_price'] = plot_df['low']
-plot_df.loc[sell_signals, 'sell_price'] = plot_df['high']
+# plot_df.loc[buy_signals, 'buy_price'] = plot_df['low']
+# plot_df.loc[sell_signals, 'sell_price'] = plot_df['high']
 
 # ==============================
 # 第三步：配置 mplfinance
@@ -48,9 +48,9 @@ apds = [
     mpf.make_addplot(plot_df['atr'], color='purple', panel=1, ylabel='ATR Value', alpha=0.7),
     
     # 绘制买入标注 (绿色向上三角)
-    mpf.make_addplot(plot_df['buy_price'], type='scatter', markersize=100, marker='^', color='lime', ),
+    # mpf.make_addplot(plot_df['buy_price'], type='scatter', markersize=100, marker='^', color='lime', ),
     # 绘制卖出标注 (红色向下三角)
-    mpf.make_addplot(plot_df['sell_price'], type='scatter', markersize=100, marker='v', color='crimson', )
+    # mpf.make_addplot(plot_df['sell_price'], type='scatter', markersize=100, marker='v', color='crimson', )
 ]
 
 my_color = mpf.make_marketcolors(up='lime', down='crimson', edge='inherit', wick='inherit', volume='in')
@@ -61,7 +61,7 @@ my_style = mpf.make_mpf_style( gridstyle=':', y_on_right=True)
 # 第四步：执行绘图并保存
 # ==============================
 
-mpf.plot(plot_df, 
+mpf.plot(df, 
          type='candle',         # 指定为蜡烛图
          style=my_style,        # 使用自定义风格
          addplot=apds,          # 加入刚才定义的指标和信号
