@@ -2,3 +2,4 @@ ccxt==4.5.46
 schedule==1.2.2
 ta==0.11.0
 matplotlib==3.10.8
+mplfinance==0.12.10b0
