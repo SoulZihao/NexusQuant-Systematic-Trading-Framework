@@ -1,19 +1,13 @@
-import datetime
-import time
-import pandas as pd
-import ccxt
-import schedule
-import config
 from ta.volatility import BollingerBands,AverageTrueRange
-
-exchange = ccxt.okx({
-    'apiKey':config.OKX_API_KEY,
-    'secret':config.OKX_SECRET_KEY,
-    'password': config.OKX_PASSPHRASE,
-})
 
 def _measure_volatility(df,window=14,window_dev=2):
     """添加AverageTrueRange和BollingerBands"""
+
+    return df
+
+
+def _super_trend(df,window=14,window_dev=2):
+    """添加各种指标判断趋势"""
     # AverageTrueRange衡量市场波动volatility
     atr_indicator = AverageTrueRange(df['high'],df['low'],df['close'],window=window)
     df['atr'] = atr_indicator.average_true_range()
@@ -23,20 +17,13 @@ def _measure_volatility(df,window=14,window_dev=2):
     df['upper_band'] = bb_indicator.bollinger_hband()
     df['lower_band'] = bb_indicator.bollinger_lband()
     df['moving_avg'] = bb_indicator.bollinger_mavg()
-    return df
-
-
-def super_trend(df,window=14,window_dev=2):
-    """添加is_uptrend判断趋势"""
-
-    _measure_volatility(df,window=window,window_dev=window_dev)
 
     # 1. 找到第一个非空的数据行（跳过前面的 NaN）
     first_valid = df['upper_band'].first_valid_index()
     if first_valid is None: return df
     
     # 2. 初始化状态只在第一个有效行设置
-    df['is_uptrend'] = True 
+    df['is_uptrend'] = True
 
     # 3. 从第一个有效行的下一行开始循环
     for i in range(first_valid + 1, len(df)):
@@ -64,11 +51,9 @@ def super_trend(df,window=14,window_dev=2):
                     df.at[i, 'upper_band'] = prev_upper
     return df
 
-in_position = False
-
-def check_buy_sell_signals(df):
-    global in_position
-
+def calc_super_trend(df)->float:
+    _super_trend(df)
+    score = 0
     print("checking for buy and sell signals")
     print(df.tail(5))
     last_row_index = len(df.index) - 1
@@ -76,37 +61,12 @@ def check_buy_sell_signals(df):
 
     if not df['is_uptrend'][previous_row_index] and df['is_uptrend'][last_row_index]:
         print("changed to uptrend, buy")
-        if not in_position:
-            order = exchange.create_market_buy_order('ETH/USDT', 0.05)
-            print(order)
-            in_position = True
-        else:
-            print("already in position, nothing to do")
+        score = 1
+        in_position = True
     
     elif df['is_uptrend'][previous_row_index] and not df['is_uptrend'][last_row_index]:
-        if in_position:
-            print("changed to downtrend, sell")
-            order = exchange.create_market_sell_order('ETH/USDT', 0.05)
-            print(order)
-            in_position = False
-        else:
-            print("You aren't in position, nothing to sell")
+        print("changed to downtrend, sell")
+        score = -1
+        in_position = False
     else: print("market is stable,nothing to do")
-
-def run_bot():
-    print(f"Fetching new bars for {datetime.datetime.date}")
-    bars = exchange.fetch_ohlcv('ETH/USDT', timeframe='1m', limit=100)
-    df = pd.DataFrame(bars[:-1], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-
-    supertrend_data = super_trend(df)   
-    check_buy_sell_signals(supertrend_data)
-
-if __name__ == '__main__':
-
-    schedule.every(2).seconds.do(run_bot)
-
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
-
+    return score
