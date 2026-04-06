@@ -1,5 +1,3 @@
-from main import fetch_data
-
 def calculate_backtest(df):
     # 1. 计算市场基础收益 (局部变量)
     market_return = df['close'].pct_change()

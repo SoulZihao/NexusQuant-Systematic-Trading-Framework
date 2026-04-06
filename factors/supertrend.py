@@ -1,79 +1,95 @@
-from ta.volatility import BollingerBands,AverageTrueRange
+from typing import override
+
+import numpy as np
 import pandas as pd
+from ta.volatility import AverageTrueRange
 
-def _measure_volatility(df,window=14,window_dev=2):
-    """添加AverageTrueRange和BollingerBands"""
-
-    return df
+from factors.base import BaseFactor
 
 
-def _super_trend(df,window=14,window_dev=2):
-    """添加各种指标判断趋势"""
-    # AverageTrueRange衡量市场波动volatility
-    atr_indicator = AverageTrueRange(df['high'],df['low'],df['close'],window=window)
-    atr = atr_indicator.average_true_range()
+class SuperTrendFactor(BaseFactor):
+    """SuperTrend。
 
-    # BollingerBands衡量波动范围
-    bb_indicator = BollingerBands(df['close'],window=window,window_dev=window_dev)
-    upper_band = pd.Series(bb_indicator.bollinger_hband(), index=df.index, name='is_uptrend')
-    lower_band = pd.Series(bb_indicator.bollinger_lband(), index=df.index, name='is_uptrend')
-    moving_avg = pd.Series(bb_indicator.bollinger_mavg(), index=df.index, name='is_uptrend')
+    原理：
+    - 以 (high + low) / 2 作为中轴（HL2）
+    - 用 ATR × multiplier 构建上下轨
+    - 当价格突破上轨时确认上升趋势，突破下轨时确认下降趋势
+    - 趋势延续时，轨道只允许朝趋势方向移动（上升趋势中下轨只升不降）
 
-    # 1. 找到第一个非空的数据行（跳过前面的 NaN）
-    first_valid_idx = df.index.get_loc(upper_band.first_valid_index())
-    
-    # 2. 初始化状态只在第一个有效行设置
-    is_uptrend = pd.Series(False, index=df.index, name='is_uptrend')
+    与 Bollinger Bands 的区别：
+    - SuperTrend 用 ATR（true range 的平滑值）度量波动，对跳空和影线更敏感
+    - Bollinger Bands 用收盘价标准差度量波动，对价格分布更敏感
+    """
 
-    # 3. 从第一个有效行的下一行开始循环
-    for i in range(first_valid_idx + 1, len(df)):
-        prev = i - 1
-        curr_close = df.at[i, 'close']
-        prev_upper = upper_band.at[prev]
-        prev_lower = lower_band.at[prev]
-        
-        # 趋势翻转逻辑
-        if curr_close > prev_upper:
-            is_uptrend[i] = True
-        elif curr_close < prev_lower:
-            is_uptrend[i] = False
-        else:
-            # 继承上一个状态
-            is_uptrend[i] = is_uptrend[prev]
-            
-            # 递归修正带状线：如果是上升趋势，下轨不能降低
-            if is_uptrend[i]:
-                if lower_band[i] < prev_lower:
-                    lower_band[i] = prev_lower
-            # 如果是下降趋势，上轨不能升高
+    name = 'supertrend'
+    category = 'trend'
+
+    def __init__(self, window: int = 14, multiplier: float = 3.0):
+        self.window = window
+        self.multiplier = multiplier
+    @override
+    def calculate(self, df: pd.DataFrame) -> pd.Series:
+        atr_indicator = AverageTrueRange(
+            df['high'], df['low'], df['close'], window=self.window
+        )
+        atr = atr_indicator.average_true_range()
+
+        hl2 = (df['high'] + df['low']) / 2.0
+        basic_upper = hl2 + self.multiplier * atr
+        basic_lower = hl2 - self.multiplier * atr
+
+        upper_band = basic_upper.copy()
+        lower_band = basic_lower.copy()
+        is_uptrend = pd.Series(True, index=df.index)
+
+        first_valid = atr.first_valid_index()
+        if first_valid is None:
+            return pd.Series(0.0, index=df.index)
+
+        start = int(df.index.get_loc(first_valid)) + 1
+
+        for i in range(start, len(df)):
+            prev = i - 1
+
+            # 上升趋势中，下轨只允许上移
+            if basic_lower.iloc[i] > lower_band.iloc[prev]:
+                lower_band.iloc[i] = basic_lower.iloc[i]
             else:
-                if upper_band[i] > prev_upper:
-                    upper_band[i] = prev_upper
-    plot_data = {
-        'upper_band':upper_band,
-        'lower_band':lower_band,
-        'atr':atr,
-        'moving_avg':moving_avg,
-        'is_uptrend':is_uptrend
-    }
-    plot_df = pd.DataFrame(plot_data)
-    return plot_df
+                lower_band.iloc[i] = lower_band.iloc[prev]
 
-def calc_super_trend(df)->float:
-    plot_df = _super_trend(df)
-    score = 0
-    print("checking for buy and sell signals")
-    print(plot_df.tail(10))
-    last_row_index = len(plot_df.index) - 1
-    previous_row_index = last_row_index - 1
+            # 下降趋势中，上轨只允许下移
+            if basic_upper.iloc[i] < upper_band.iloc[prev]:
+                upper_band.iloc[i] = basic_upper.iloc[i]
+            else:
+                upper_band.iloc[i] = upper_band.iloc[prev]
 
-    if not plot_df['is_uptrend'][previous_row_index] and plot_df['is_uptrend'][last_row_index]:
-        print("changed to uptrend, buy")
-        score = 1
-        in_position = True
-    
-    elif plot_df['is_uptrend'][previous_row_index] and not plot_df['is_uptrend'][last_row_index]:
-        print("changed to downtrend, sell")
-        score = -1
-    else: print("market is stable,nothing to do")
-    return score
+            # 趋势翻转判断
+            if is_uptrend.iloc[prev]:
+                if df['close'].iloc[i] < lower_band.iloc[i]:
+                    is_uptrend.iloc[i] = False
+                else:
+                    is_uptrend.iloc[i] = True
+            else:
+                if df['close'].iloc[i] > upper_band.iloc[i]:
+                    is_uptrend.iloc[i] = True
+                else:
+                    is_uptrend.iloc[i] = False
+
+        # 生成连续信号：价格距离超势线的远近代表信号强度
+        # 上升趋势中，用 (close - lower_band) / (upper_band - lower_band) 映射到 [0, 1]
+        # 下降趋势中，用 (close - upper_band) / (upper_band - lower_band) 映射到 [-1, 0]
+        band_width = upper_band - lower_band
+        band_width = band_width.replace(0, np.nan)
+
+        signal = pd.Series(0.0, index=df.index)
+        up_mask = is_uptrend.astype(bool)
+        down_mask = ~up_mask
+
+        signal[up_mask] = (
+            (df['close'][up_mask] - lower_band[up_mask]) / band_width[up_mask]
+        )
+        signal[down_mask] = (
+            (df['close'][down_mask] - upper_band[down_mask]) / band_width[down_mask]
+        )
+
+        return signal.clip(-1, 1).fillna(0)
